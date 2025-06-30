@@ -11,13 +11,21 @@ import io
 from dotenv import load_dotenv
 import os
 
+# Load environment variables from .env file
 load_dotenv()
 
+# App setup
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', 'supersecretkey')  # Load from env or fallback
+app.secret_key = os.getenv('SECRET_KEY', 'supersecretkey')
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+)
+
 CORS(app)
 limiter = Limiter(get_remote_address, app=app)
 
+# Routes
 @app.route('/')
 def home():
     return render_template('index.html')
@@ -42,26 +50,37 @@ def submit():
 
 @app.route('/logs')
 def view_logs():
-    if 'logged_in' not in session:
+    if not session.get('logged_in'):
         return redirect(url_for('login'))
 
-    conn = sqlite3.connect('logs.db')
-    c = conn.cursor()
-    c.execute("SELECT ip, payload, timestamp FROM sqli_logs ORDER BY timestamp DESC")
-    logs = c.fetchall()
-    conn.close()
+    try:
+        conn = sqlite3.connect('logs.db')
+        c = conn.cursor()
+        c.execute("SELECT ip, payload, timestamp FROM sqli_logs ORDER BY timestamp DESC")
+        logs = c.fetchall()
+    except sqlite3.Error as e:
+        logs = []
+        print(f"[DB ERROR] {e}")
+    finally:
+        conn.close()
+    
     return render_template('dashboard.html', logs=logs)
 
 @app.route('/export/csv')
 def export_csv():
-    if 'logged_in' not in session:
+    if not session.get('logged_in'):
         return redirect(url_for('login'))
 
-    conn = sqlite3.connect('logs.db')
-    c = conn.cursor()
-    c.execute("SELECT ip, payload, timestamp FROM sqli_logs ORDER BY timestamp DESC")
-    logs = c.fetchall()
-    conn.close()
+    try:
+        conn = sqlite3.connect('logs.db')
+        c = conn.cursor()
+        c.execute("SELECT ip, payload, timestamp FROM sqli_logs ORDER BY timestamp DESC")
+        logs = c.fetchall()
+    except sqlite3.Error as e:
+        logs = []
+        print(f"[DB ERROR] {e}")
+    finally:
+        conn.close()
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -75,19 +94,23 @@ def export_csv():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     error = None
+    admin_user = os.getenv('ADMIN_USER', 'admin')
+    admin_pass = os.getenv('ADMIN_PASS', 'adminpass')
+
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-        if username == os.getenv('ADMIN_USER', 'admin') and password == os.getenv('ADMIN_PASS', 'adminpass'):
+        if username == admin_user and password == admin_pass:
             session['logged_in'] = True
             return redirect(url_for('view_logs'))
         else:
             error = "Invalid credentials"
+
     return render_template('login.html', error=error)
 
 @app.route('/logout')
 def logout():
-    session.pop('logged_in', None)
+    session.clear()
     return redirect(url_for('login'))
 
 @app.route('/credits')

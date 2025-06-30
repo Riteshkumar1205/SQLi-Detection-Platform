@@ -5,27 +5,41 @@ from logger import log_sqli_attempt
 from notifier import send_email, send_slack
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from dotenv import load_dotenv
 import sqlite3
 import csv
 import io
-from dotenv import load_dotenv
 import os
+import subprocess
+import psutil
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
-# App setup
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'supersecretkey')
-app.config.update(
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE='Lax',
-)
-
 CORS(app)
 limiter = Limiter(get_remote_address, app=app)
 
-# Routes
+# Check if Burp Suite is already running
+def is_burp_running():
+    for proc in psutil.process_iter(['name']):
+        try:
+            if proc.info['name'] and 'burp' in proc.info['name'].lower():
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return False
+
+# Attempt to start Burp Suite
+def launch_burp():
+    if not is_burp_running():
+        try:
+            subprocess.Popen(['burpsuite'])  # Adjust if full path is needed
+            print("✅ Burp Suite launched.")
+        except Exception as e:
+            print(f"❌ Failed to start Burp Suite: {e}")
+
 @app.route('/')
 def home():
     return render_template('index.html')
@@ -44,43 +58,33 @@ def submit():
         log_sqli_attempt(ip, user_input)
         send_email(ip, user_input)
         send_slack(user_input)
+        launch_burp()  # 🚀 Trigger Burp Suite if not already running
         return jsonify({"alert": "⚠️ SQL Injection attempt detected!"}), 400
 
     return jsonify({"message": "✅ Input accepted."})
 
 @app.route('/logs')
 def view_logs():
-    if not session.get('logged_in'):
+    if 'logged_in' not in session:
         return redirect(url_for('login'))
 
-    try:
-        conn = sqlite3.connect('logs.db')
-        c = conn.cursor()
-        c.execute("SELECT ip, payload, timestamp FROM sqli_logs ORDER BY timestamp DESC")
-        logs = c.fetchall()
-    except sqlite3.Error as e:
-        logs = []
-        print(f"[DB ERROR] {e}")
-    finally:
-        conn.close()
-    
+    conn = sqlite3.connect('logs.db')
+    c = conn.cursor()
+    c.execute("SELECT ip, payload, timestamp FROM sqli_logs ORDER BY timestamp DESC")
+    logs = c.fetchall()
+    conn.close()
     return render_template('dashboard.html', logs=logs)
 
 @app.route('/export/csv')
 def export_csv():
-    if not session.get('logged_in'):
+    if 'logged_in' not in session:
         return redirect(url_for('login'))
 
-    try:
-        conn = sqlite3.connect('logs.db')
-        c = conn.cursor()
-        c.execute("SELECT ip, payload, timestamp FROM sqli_logs ORDER BY timestamp DESC")
-        logs = c.fetchall()
-    except sqlite3.Error as e:
-        logs = []
-        print(f"[DB ERROR] {e}")
-    finally:
-        conn.close()
+    conn = sqlite3.connect('logs.db')
+    c = conn.cursor()
+    c.execute("SELECT ip, payload, timestamp FROM sqli_logs ORDER BY timestamp DESC")
+    logs = c.fetchall()
+    conn.close()
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -94,23 +98,19 @@ def export_csv():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     error = None
-    admin_user = os.getenv('ADMIN_USER', 'admin')
-    admin_pass = os.getenv('ADMIN_PASS', 'adminpass')
-
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-        if username == admin_user and password == admin_pass:
+        if username == os.getenv('ADMIN_USER', 'admin') and password == os.getenv('ADMIN_PASS', 'adminpass'):
             session['logged_in'] = True
             return redirect(url_for('view_logs'))
         else:
             error = "Invalid credentials"
-
     return render_template('login.html', error=error)
 
 @app.route('/logout')
 def logout():
-    session.clear()
+    session.pop('logged_in', None)
     return redirect(url_for('login'))
 
 @app.route('/credits')

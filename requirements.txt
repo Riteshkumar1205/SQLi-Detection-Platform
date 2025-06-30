@@ -1,5 +1,6 @@
 flask
-flask-cors
-flask-limiter
+mysql-connector-python
+jinja2
+regex
+scikit-learn
 requests
-python-dotenv

@@ -9,11 +9,12 @@ import sqlite3
 import csv
 import io
 from dotenv import load_dotenv
+import os
 
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = 'supersecretkey'
+app.secret_key = os.getenv('SECRET_KEY', 'supersecretkey')  # Load from env or fallback
 CORS(app)
 limiter = Limiter(get_remote_address, app=app)
 
@@ -24,8 +25,8 @@ def home():
 @app.route('/submit', methods=['POST'])
 @limiter.limit("10 per minute")
 def submit():
-    user_input = request.form.get('input')
-    honeypot = request.form.get('honeypot')
+    user_input = request.form.get('input', '')
+    honeypot = request.form.get('honeypot', '')
     ip = request.remote_addr
 
     if honeypot:
@@ -36,6 +37,7 @@ def submit():
         send_email(ip, user_input)
         send_slack(user_input)
         return jsonify({"alert": "⚠️ SQL Injection attempt detected!"}), 400
+
     return jsonify({"message": "✅ Input accepted."})
 
 @app.route('/logs')
@@ -52,6 +54,9 @@ def view_logs():
 
 @app.route('/export/csv')
 def export_csv():
+    if 'logged_in' not in session:
+        return redirect(url_for('login'))
+
     conn = sqlite3.connect('logs.db')
     c = conn.cursor()
     c.execute("SELECT ip, payload, timestamp FROM sqli_logs ORDER BY timestamp DESC")
@@ -69,11 +74,21 @@ def export_csv():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    error = None
     if request.method == 'POST':
-        if request.form['username'] == 'admin' and request.form['password'] == 'adminpass':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        if username == os.getenv('ADMIN_USER', 'admin') and password == os.getenv('ADMIN_PASS', 'adminpass'):
             session['logged_in'] = True
             return redirect(url_for('view_logs'))
-    return render_template('login.html')
+        else:
+            error = "Invalid credentials"
+    return render_template('login.html', error=error)
+
+@app.route('/logout')
+def logout():
+    session.pop('logged_in', None)
+    return redirect(url_for('login'))
 
 @app.route('/credits')
 def credits():

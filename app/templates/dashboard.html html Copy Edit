@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SQLi Detection Dashboard</title>
+    <meta http-equiv="refresh" content="5">
+    <style>
+        body { font-family: Arial; background: #1e1e1e; color: #00ff88; padding: 20px; }
+        h2 { color: #00ffcc; }
+        li { margin: 5px 0; font-size: 15px; }
+    </style>
+</head>
+<body>
+    <h2>🛡️ Live SQL Injection Detections</h2>
+    <ul>
+        {% for line in logs %}
+            <li>{{ line }}</li>
+        {% endfor %}
+    </ul>
+    <hr>
+    <a href="{{ url_for('index') }}" style="color: #00ffff;">← Back to Home</a>
+</body>
+</html>
